@@ -1,13 +1,14 @@
-
 {
   "name": "notebookpress",
   "displayName": "NotebookPress",
+  "publisher": "KartikeySinghSuryavanshi",
   "description": "Smart PDF export for Jupyter notebooks",
-  "version": "0.0.1",
+  "license": "MIT",
+  "version": "0.0.3",
   "repository": {
-  "type": "git",
-  "url": "https://github.com/Kartikey0706/NotebookPress.git"
-},
+    "type": "git",
+    "url": "https://github.com/Kartikey0706/NotebookPress.git"
+  },
   "engines": {
     "vscode": "^1.140.0"
   },
@@ -22,9 +23,19 @@
     "commands": [
       {
         "command": "notebookpress.exportPdf",
-        "title": "NotebookPress: Export Notebook to Smart PDF"
+        "title": "NotebookPress: Export Notebook to Smart PDF",
+        "icon": "$(file-pdf)"
       }
-    ]
+    ],
+    "menus": {
+      "notebook/toolbar": [
+        {
+          "command": "notebookpress.exportPdf",
+          "when": "notebookType == 'jupyter-notebook'",
+          "group": "navigation"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run package",

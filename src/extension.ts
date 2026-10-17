@@ -69,29 +69,31 @@ function imageBuffer(value: unknown): Buffer | undefined {
 export function activate(context: vscode.ExtensionContext) {
 	const disposable = vscode.commands.registerCommand(
 		'notebookpress.exportPdf',
-		async () => {
+		async (uri?: vscode.Uri) => {
 			try {
+				const notebookEditor = vscode.window.activeNotebookEditor;
 				const editor = vscode.window.activeTextEditor;
-				let notebookPath =
-					editor?.document.uri.fsPath.toLowerCase().endsWith('.ipynb')
-						? editor.document.uri.fsPath
-						: undefined;
 
-				if (!notebookPath) {
-					const selected = await vscode.window.showOpenDialog({
-						canSelectMany: false,
-						openLabel: 'Select Notebook',
-						filters: {
-							'Jupyter Notebook': ['ipynb']
-						}
-					});
+				const candidateUri =
+					uri?.scheme === 'file' &&
+						uri.fsPath.toLowerCase().endsWith('.ipynb')
+						? uri
+						: notebookEditor?.notebook.uri.scheme === 'file' &&
+							notebookEditor.notebook.uri.fsPath.toLowerCase().endsWith('.ipynb')
+							? notebookEditor.notebook.uri
+							: editor?.document.uri.scheme === 'file' &&
+								editor.document.uri.fsPath.toLowerCase().endsWith('.ipynb')
+								? editor.document.uri
+								: undefined;
 
-					if (!selected?.length) {
-						return;
-					}
-
-					notebookPath = selected[0].fsPath;
+				if (!candidateUri) {
+					vscode.window.showErrorMessage(
+						'NotebookPress: Please open a Jupyter notebook first.'
+					);
+					return;
 				}
+
+				const notebookPath = candidateUri.fsPath;
 
 				const raw = await fs.readFile(notebookPath, 'utf8');
 				const notebook = JSON.parse(raw) as Notebook;
@@ -613,6 +615,3 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 export function deactivate() { }
-
-
-
