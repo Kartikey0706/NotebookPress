@@ -1,0 +1,10 @@
+
+node_modules/**
+backups/**
+src/**
+*.ipynb
+*.backup*
+*.bak
+*.txt
+esbuild.js*
+tsconfig.json
