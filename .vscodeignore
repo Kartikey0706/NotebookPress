@@ -36,3 +36,10 @@ node_modules/**/.npmignore
 node_modules/**/*.map
 node_modules/**/*.ts
 node_modules/**/*.d.ts
+# Local backup files
+*.markdown-backup
+*.pre-safe-renderer
+*.pre-step2
+*.pre-step3
+*.step3-backup
+release-backup-*/
