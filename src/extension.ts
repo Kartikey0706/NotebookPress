@@ -1,8 +1,8 @@
-﻿
-import * as vscode from 'vscode';
+﻿import * as vscode from 'vscode';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import PDFDocument from 'pdfkit';
+const { marked } = require('marked') as typeof import('marked');
 
 type NotebookOutput = {
 	data?: Record<string, unknown>;
@@ -52,7 +52,68 @@ function cleanMarkdown(source: string): string {
 
 }
 
+type MarkdownToken = {
+	type: string;
+	text?: string;
+	tokens?: MarkdownToken[];
+	depth?: number;
+	ordered?: boolean;
+	items?: MarkdownToken[];
+	href?: string;
+};
+
+function markdownPlainText(tokens: MarkdownToken[]): string {
+        return tokens.map((token) => {
+                if (token.type === 'space') {
+                        return '\n\n';
+                }
+
+                if (token.type === 'list') {
+                        return (token.items ?? [])
+                                .map((item, index) => {
+                                        const content = markdownPlainText(
+                                                item.tokens ?? []
+                                        ).trim();
+
+                                        const prefix = token.ordered
+                                                ? `${index + 1}. `
+                                                : '\u2022 ';
+
+                                        return `${prefix}${content}`;
+                                })
+                                .join('\n');
+                }
+
+                if (token.type === 'heading' || token.type === 'paragraph' ||
+                    token.type === 'strong' || token.type === 'em' ||
+                    token.type === 'del' || token.type === 'link') {
+                        return markdownPlainText(token.tokens ?? []);
+                }
+
+                if (token.type === 'codespan' || token.type === 'text' ||
+                    token.type === 'escape' || token.type === 'html' ||
+                    token.type === 'code') {
+                        return token.text ?? '';
+                }
+
+                if (token.type === 'br') {
+                        return '\n';
+                }
+
+                if (token.type === 'image') {
+                        return `[Image: ${token.text ?? 'image'}]`;
+                }
+
+                if (token.tokens) {
+                        return markdownPlainText(token.tokens);
+                }
+
+                return token.text ?? '';
+        }).join('');
+}
+
 function imageBuffer(value: unknown): Buffer | undefined {
+
 	const encoded = asText(value).replace(/\s/g, '');
 
 	if (!encoded) {
@@ -214,7 +275,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 								// Move to a new page if the paragraph cannot fit in the
 								// remaining space and there is already content on the page.
-								if (height > remainingSpace && doc.y > doc.page.margins.top) {
+								if (remainingSpace < size * 1.6 && doc.y > doc.page.margins.top) {
 									doc.addPage();
 								}
 
@@ -420,71 +481,78 @@ export function activate(context: vscode.ExtensionContext) {
 
 
 									if (cell.cell_type === 'markdown') {
-										const heading = source.match(
-											/^\s*(#{1,6})\s+(.+)/m
-										);
+        const tokens = marked.lexer(source) as MarkdownToken[];
 
-										if (heading) {
-											const level = heading[1].length;
-											const headingText = heading[2].trim();
+        const headingSizes: Record<number, number> = {
+                1: 20, 2: 17, 3: 15, 4: 13, 5: 12, 6: 11
+        };
 
-											const headingSizes: Record<number, number> = {
-												1: 20,
-												2: 17,
-												3: 15,
-												4: 13,
-												5: 12,
-												6: 11
-											};
+        const renderBlocks = (blocks: MarkdownToken[]) => {
+                for (const token of blocks) {
+                        if (token.type === 'heading') {
+                                const level = token.depth ?? 1;
+                                const size = headingSizes[level] ?? 12;
+                                const text = markdownPlainText(token.tokens ?? []).trim();
 
-											const size = headingSizes[level] ?? 12;
-											const headingColor =
-												level <= 2 ? '#17365D' : '#304B6B';
+                                if (!text) continue;
 
-											// Keep a heading from starting too close to the bottom.
-											ensureSpace(size * 2 + 24);
+                                ensureSpace(size * 2 + 20);
+                                doc.moveDown(level <= 2 ? 0.35 : 0.2);
+                                doc.font('Helvetica-Bold')
+                                        .fontSize(size)
+                                        .fillColor(level <= 2 ? '#17365D' : '#304B6B')
+                                        .text(text, { width: pageWidth, lineGap: 2 });
 
-											doc.moveDown(level <= 2 ? 0.35 : 0.2);
+                                if (level <= 2) {
+                                        const dividerY = doc.y + 3;
+                                        doc.save();
+                                        doc.moveTo(doc.page.margins.left, dividerY)
+                                                .lineTo(doc.page.margins.left + pageWidth, dividerY)
+                                                .lineWidth(level === 1 ? 1 : 0.6)
+                                                .strokeColor('#D5DEE9')
+                                                .stroke();
+                                        doc.restore();
+                                        doc.y = dividerY + 5;
+                                }
+                                doc.moveDown(0.25);
+                        } else if (token.type === 'paragraph') {
+                                const text = markdownPlainText(token.tokens ?? []).trim();
+                                if (text) writeParagraph(text);
+                        } else if (token.type === 'list') {
+                                for (const [i, item] of (token.items ?? []).entries()) {
+                                        const content = markdownPlainText(item.tokens ?? []).trim();
+                                        if (!content) continue;
+                                        const prefix = token.ordered ? `${i + 1}. ` : '\u2022 ';
+                                        writeParagraph(prefix + content);
+                                }
+                                doc.moveDown(0.25);
+                        } else if (token.type === 'code') {
+                                writeCode(token.text ?? '', '#F3F5F7');
+                        } else if (token.type === 'blockquote') {
+                                const text = markdownPlainText(token.tokens ?? []).trim();
+                                if (text) writeParagraph(text, 10, '#52657A');
+                        } else if (token.type === 'hr') {
+                                doc.moveDown(0.3);
+                                const y = doc.y;
+                                doc.save();
+                                doc.moveTo(doc.page.margins.left, y)
+                                        .lineTo(doc.page.margins.left + pageWidth, y)
+                                        .lineWidth(0.6)
+                                        .strokeColor('#D5DEE9')
+                                        .stroke();
+                                doc.restore();
+                                doc.moveDown(0.5);
+                        } else if (token.type === 'space') {
+                                doc.moveDown(0.25);
+                        } else {
+                                const text = markdownPlainText([token]).trim();
+                                if (text) writeParagraph(text);
+                        }
+                }
+        };
 
-											doc.font('Helvetica-Bold')
-												.fontSize(size)
-												.fillColor(headingColor)
-												.text(headingText, {
-													width: pageWidth,
-													lineGap: 2
-												});
-
-											if (level <= 2) {
-												const dividerY = doc.y + 3;
-
-												doc.save();
-												doc.moveTo(doc.page.margins.left, dividerY)
-													.lineTo(
-														doc.page.margins.left + pageWidth,
-														dividerY
-													)
-													.lineWidth(level === 1 ? 1 : 0.6)
-													.strokeColor('#D5DEE9')
-													.stroke();
-												doc.restore();
-
-												doc.y = dividerY + 5;
-											}
-
-											doc.moveDown(level <= 2 ? 0.3 : 0.2);
-
-											const remainder = source.replace(
-												/^\s*#{1,6}\s+.+$/m,
-												''
-											).trim();
-
-											if (remainder) {
-												writeParagraph(cleanMarkdown(remainder));
-											}
-										} else {
-											writeParagraph(cleanMarkdown(source));
-										}
-									} else if (cell.cell_type === 'code') {
+        renderBlocks(tokens);
+} else if (cell.cell_type === 'code') {
 
 										doc.font('Helvetica-Bold')
 											.fontSize(9)
