@@ -5,9 +5,10 @@ Export Jupyter notebooks from Visual Studio Code to clean, readable PDF document
 ## Features
 
 - Export the active Jupyter notebook to PDF.
-- Save the generated PDF to a location of your choice.
+- Choose where to save the generated PDF.
 - Preserve notebook text, code cells, and supported chart images.
-- Format code cells with a readable monospace font.
+- Render Markdown content, including headings, paragraphs, and lists.
+- Format code cells using a readable monospace font.
 - Add document metadata and page numbers.
 - Open the exported PDF directly from the success notification.
 
@@ -19,10 +20,10 @@ Export Jupyter notebooks from Visual Studio Code to clean, readable PDF document
 ## Usage
 
 1. Open a Jupyter notebook in Visual Studio Code.
-2. Open the Command Palette with `Ctrl+Shift+P`.
+2. Open the Command Palette using `Ctrl+Shift+P`.
 3. Run **NotebookPress: Export Notebook to Smart PDF**.
 4. Choose the destination and filename.
-5. Wait for the export to finish. Use **Open PDF** in the notification if desired.
+5. Wait for the export to finish. Select **Open PDF** in the notification to view the result.
 
 ## Notes
 
@@ -32,4 +33,4 @@ Export Jupyter notebooks from Visual Studio Code to clean, readable PDF document
 
 ## Support
 
-If export fails, check the error message shown by NotebookPress and verify that the destination folder is writable.
+If an export fails, check the error message shown by NotebookPress and verify that the destination folder is writable.
