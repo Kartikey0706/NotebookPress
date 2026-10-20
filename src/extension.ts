@@ -1,7 +1,11 @@
-﻿import * as vscode from 'vscode';
+import * as vscode from 'vscode';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import PDFDocument from 'pdfkit';
+import hljs from 'highlight.js/lib/core';
+import python from 'highlight.js/lib/languages/python';
+
+hljs.registerLanguage('python', python);
 const { marked } = require('marked') as typeof import('marked');
 
 type NotebookOutput = {
@@ -279,71 +283,132 @@ export function activate(context: vscode.ExtensionContext) {
 									doc.addPage();
 								}
 
-								doc.text(text, {
-									width: pageWidth,
-									lineGap: 2
-								});
+								doc.text(text, doc.page.margins.left, doc.y, {
+                                                                        width: pageWidth,
+                                                                        lineGap: 2,
+                                                                        align: 'left'
+                                                                });
 
 								doc.moveDown(0.4);
 							};
 
 							const writeCode = (source: string, backgroundColor: string) => {
-								const lines = source.replace(/\r\n/g, '\n').split('\n');
-								const lineHeight = 11;
-								const padding = 7;
+        const lines = source.replace(/\r\n/g, '\n').split('\n');
+        const lineHeight = 11;
+        const padding = 7;
+        const textWidth = pageWidth - padding * 2;
+        const getMaxY = () => doc.page.height - doc.page.margins.bottom;
 
-								const getMaxY = () =>
-									doc.page.height - doc.page.margins.bottom;
+        const colors: Record<string, string> = {
+                keyword: '#C586C0',
+                string: '#A31515',
+                comment: '#008000',
+                number: '#098658',
+                title: '#795E26',
+                built_in: '#267F99',
+                literal: '#0000FF',
+                type: '#267F99',
+                meta: '#AF00DB',
+                operator: '#666666',
+                function: '#795E26',
+                params: '#001080',
+                attr: '#267F99',
+                variable: '#001080',
+                subst: '#A31515',
+                punctuation: '#404040',
+                default: '#20242A'
+        };
 
-								const writeLine = (line: string) => {
-									const text = line || ' ';
-									const textWidth = pageWidth - padding * 2;
+        const decodeHtml = (value: string): string => value
+                .replace(/&amp;/g, '&')
+                .replace(/&lt;/g, '<')
+                .replace(/&gt;/g, '>')
+                .replace(/&quot;/g, '"')
+                .replace(/&#x27;/g, "'")
+                .replace(/&#39;/g, "'");
 
-									doc.font('Courier').fontSize(8);
+        const highlightLine = (line: string): Array<{ text: string; color: string }> => {
+                try {
+                        const html = hljs.highlight(line || ' ', {
+                                language: 'python',
+                                ignoreIllegals: true
+                        }).value;
+                        const segments: Array<{ text: string; color: string }> = [];
+                        const stack: string[] = [];
+                        const pattern = /<\/?span\b[^>]*>|[^<]+|</g;
+                        let match: RegExpExecArray | null;
 
-									const wrapped = doc.heightOfString(text, {
-										width: textWidth,
-										lineGap: 1
-									});
+                        while ((match = pattern.exec(html)) !== null) {
+                                const part = match[0];
+                                if (part.startsWith('</span')) {
+                                        stack.pop();
+                                } else if (part.startsWith('<span')) {
+                                        const classMatch = part.match(/class="([^"]+)"/);
+                                        stack.push(classMatch ? classMatch[1] : '');
+                                } else {
+                                        const value = decodeHtml(part);
+                                        if (value) {
+                                                const classes = (stack[stack.length - 1] || '').split(/\s+/);
+                                                const token = classes.find(name => name.startsWith('hljs-'))?.slice(5) || 'default';
+                                                const color = colors[token] || (
+                                                        token.startsWith('title') ? colors.title :
+                                                        token.startsWith('type') ? colors.type :
+                                                        colors.default
+                                                );
+                                                segments.push({ text: value, color });
+                                        }
+                                }
+                        }
+                        return segments.length ? segments : [{ text: line || ' ', color: colors.default }];
+                } catch {
+                        return [{ text: line || ' ', color: colors.default }];
+                }
+        };
 
-									const required = Math.max(lineHeight, wrapped);
-									const blockHeight = required + 4;
+        const writeLine = (line: string) => {
+                const text = line || ' ';
+                doc.font('Courier-Bold').fontSize(8);
+                const wrapped = doc.heightOfString(text, {
+                        width: textWidth,
+                        lineGap: 1
+                });
+                const required = Math.max(lineHeight, wrapped);
+                const blockHeight = required + 4;
 
-									// Start a new page before the line reaches the bottom margin.
-									if (doc.y + blockHeight + padding > getMaxY()) {
-										doc.addPage();
-									}
+                if (doc.y + blockHeight + padding > getMaxY()) {
+                        doc.addPage();
+                }
 
-									const startY = doc.y;
+                const startY = doc.y;
+                doc.save();
+                doc.roundedRect(
+                        doc.page.margins.left,
+                        startY - 2,
+                        pageWidth,
+                        blockHeight,
+                        2
+                ).fill(backgroundColor);
+                doc.restore();
 
-									doc.save();
-									doc.roundedRect(
-										doc.page.margins.left,
-										startY - 2,
-										pageWidth,
-										blockHeight,
-										2
-									).fill(backgroundColor);
-									doc.restore();
+                let x = doc.page.margins.left + padding;
+                const y = startY;
 
-									doc.font('Courier')
-										.fontSize(8)
-										.fillColor('#20242A')
-										.text(text, doc.page.margins.left + padding, startY, {
-											width: textWidth,
-											lineGap: 1
-										});
+                for (const segment of highlightLine(text)) {
+                        doc.font('Courier-Bold').fontSize(8).fillColor(segment.color);
+                        doc.text(segment.text, x, y, { lineBreak: false });
+                        x += doc.widthOfString(segment.text);
+                }
 
-									doc.y = startY + required + 2;
-								};
+                doc.y = startY + required + 2;
+        };
 
-								for (const line of lines) {
-									writeLine(line);
-								}
+        for (const line of lines) {
+                writeLine(line);
+        }
 
-								doc.moveDown(0.7);
-							};
-
+        doc.fillColor('#20242A');
+        doc.moveDown(0.7);
+};
 							const writeImage = (buffer: Buffer) => {
 								try {
 									const maxHeight = 300;
@@ -501,7 +566,11 @@ export function activate(context: vscode.ExtensionContext) {
                                 doc.font('Helvetica-Bold')
                                         .fontSize(size)
                                         .fillColor(level <= 2 ? '#17365D' : '#304B6B')
-                                        .text(text, { width: pageWidth, lineGap: 2 });
+                                        .text(text, doc.page.margins.left, doc.y, {
+                                                width: pageWidth,
+                                                lineGap: 2,
+                                                align: 'left'
+                                        });
 
                                 if (level <= 2) {
                                         const dividerY = doc.y + 3;
@@ -554,17 +623,42 @@ export function activate(context: vscode.ExtensionContext) {
         renderBlocks(tokens);
 } else if (cell.cell_type === 'code') {
 
-										doc.font('Helvetica-Bold')
-											.fontSize(9)
-											.fillColor('#52657A')
-											.text(
-												'Code:',
-												{ width: pageWidth }
-											);
 
+                                    // Professional Jupyter-style code cell header
+                                    ensureSpace(30);
 
-										doc.moveDown(0.2);
-										writeCode(source, '#F0F5FF');
+                                    const headerY = doc.y;
+                                    const headerHeight = 22;
+                                    const executionLabel =
+                                        cell.execution_count == null
+                                            ? 'In [ ]'
+                                            : `In [${cell.execution_count}]`;
+
+                                    doc.save();
+                                    doc.roundedRect(
+                                        doc.page.margins.left,
+                                        headerY,
+                                        pageWidth,
+                                        headerHeight,
+                                        4
+                                    ).fill('#E8EEF8');
+                                    doc.restore();
+
+                                    doc.font('Helvetica-Bold')
+                                        .fontSize(9)
+                                        .fillColor('#284B78')
+                                        .text(
+                                            executionLabel,
+                                            doc.page.margins.left + 9,
+                                            headerY + 6,
+                                            {
+                                                width: pageWidth - 18,
+                                                lineBreak: false
+                                            }
+                                        );
+
+                                    doc.y = headerY + headerHeight + 5;
+                                    writeCode(source, '#F5F8FD');
 
 										for (const output of cell.outputs ?? []) {
 											const data = output.data ?? {};
@@ -634,7 +728,7 @@ export function activate(context: vscode.ExtensionContext) {
 										);
 
 									doc.text(
-										`Page ${pageIndex + 1} of ${range.count}`,
+										`${pageIndex + 1}`,
 										doc.page.margins.left + pageWidth / 2,
 										footerY,
 										{

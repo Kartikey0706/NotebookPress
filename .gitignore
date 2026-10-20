@@ -17,3 +17,13 @@ backups/
 .env
 .env.*
 !.env.example
+# Local VS Code test installations
+.vscode-test/
+
+# Local markdown and source backups
+*.markdown-backup
+*.pre-safe-renderer
+*.pre-step2
+*.pre-step3
+*.step3-backup
+release-backup-*/
