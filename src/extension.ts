@@ -292,6 +292,63 @@ export function activate(context: vscode.ExtensionContext) {
 								doc.moveDown(0.4);
 							};
 
+                            // ---- Report format helpers (Times New Roman, inline bold/italic) ----
+                            type Run = { text: string; bold: boolean; italic: boolean };
+                            const inlineRuns = (toks: any[], bold = false, italic = false): Run[] => {
+                                const runs: Run[] = [];
+                                for (const t of toks ?? []) {
+                                    if (t.type === 'strong') {
+                                        runs.push(...inlineRuns(t.tokens ?? [], true, italic));
+                                    } else if (t.type === 'em') {
+                                        runs.push(...inlineRuns(t.tokens ?? [], bold, true));
+                                    } else if (t.type === 'br') {
+                                        runs.push({ text: '\n', bold, italic });
+                                    } else if (t.tokens && t.tokens.length) {
+                                        runs.push(...inlineRuns(t.tokens, bold, italic));
+                                    } else {
+                                        const text = markdownPlainText([t]);
+                                        if (text) runs.push({ text, bold, italic });
+                                    }
+                                }
+                                return runs;
+                            };
+
+                            const writeRich = (toks: any[], prefix = '') => {
+                                const runs = inlineRuns(toks);
+                                if (!runs.length) return;
+                                runs[0].text = runs[0].text.replace(/^\s+/, '');
+                                runs[runs.length - 1].text = runs[runs.length - 1].text.replace(/\s+$/, '');
+                                if (prefix) runs.unshift({ text: prefix, bold: false, italic: false });
+                                const plain = runs.map((r) => r.text).join('');
+                                if (!plain.trim()) return;
+
+                                const maxY = doc.page.height - doc.page.margins.bottom;
+                                if (maxY - doc.y < 12 * 1.6 && doc.y > doc.page.margins.top) {
+                                    doc.addPage();
+                                }
+
+                                runs.forEach((run, i) => {
+                                    const font = run.bold && run.italic ? 'Times-BoldItalic'
+                                        : run.bold ? 'Times-Bold'
+                                        : run.italic ? 'Times-Italic'
+                                        : 'Times-Roman';
+                                    doc.font(font).fontSize(12).fillColor('#000000');
+                                    const opts = {
+                                        width: pageWidth,
+                                        lineGap: 2,
+                                        align: 'left' as const,
+                                        continued: i < runs.length - 1
+                                    };
+                                    if (i === 0) {
+                                        doc.text(run.text, doc.page.margins.left, doc.y, opts);
+                                    } else {
+                                        doc.text(run.text, opts);
+                                    }
+                                });
+                                doc.moveDown(0.4);
+                            };
+
+
 							const writeCode = (source: string, backgroundColor: string) => {
         const lines = source.replace(/\r\n/g, '\n').split('\n');
         const lineHeight = 11;
@@ -514,32 +571,6 @@ export function activate(context: vscode.ExtensionContext) {
 							};
 
 							try {
-								// Document title at the top of the first content page
-								const documentTitle = path
-									.basename(notebookPath!, path.extname(notebookPath!))
-									.replace(/[_-]+/g, ' ')
-									.trim();
-
-								doc.font('Helvetica-Bold')
-									.fontSize(20)
-									.fillColor('#17365D')
-									.text(documentTitle || 'Practical Report', {
-										width: pageWidth,
-										align: 'center',
-										lineGap: 3
-									});
-
-								doc.moveDown(0.3);
-
-								doc.save();
-								doc.moveTo(doc.page.margins.left, doc.y)
-									.lineTo(doc.page.margins.left + pageWidth, doc.y)
-									.lineWidth(1)
-									.strokeColor('#D5DEE9')
-									.stroke();
-								doc.restore();
-
-								doc.moveDown(0.7);
 
 								for (const [index, cell] of notebook.cells!.entries()) {
 									const source = asText(cell.source);
@@ -548,58 +579,42 @@ export function activate(context: vscode.ExtensionContext) {
 									if (cell.cell_type === 'markdown') {
         const tokens = marked.lexer(source) as MarkdownToken[];
 
-        const headingSizes: Record<number, number> = {
-                1: 20, 2: 17, 3: 15, 4: 13, 5: 12, 6: 11
-        };
-
         const renderBlocks = (blocks: MarkdownToken[]) => {
                 for (const token of blocks) {
                         if (token.type === 'heading') {
-                                const level = token.depth ?? 1;
-                                const size = headingSizes[level] ?? 12;
                                 const text = markdownPlainText(token.tokens ?? []).trim();
-
                                 if (!text) continue;
 
+                                // "Experiment 3", "Experiment No. 3", "Exp. 3" -> centered
+                                const isExperiment = /^\s*(experiment|exp)\.?\s*(no\.?|number)?\s*[:.\-]?\s*\d+/i.test(text);
+                                const level = token.depth ?? 1;
+                                // Heading = 14pt bold, Subheading = 12pt bold (Times New Roman)
+                                const size = (level === 1 || isExperiment) ? 14 : 12;
+                                const align = isExperiment ? 'center' : 'left';
+
                                 ensureSpace(size * 2 + 20);
-                                doc.moveDown(level <= 2 ? 0.35 : 0.2);
-                                doc.font('Helvetica-Bold')
+                                doc.moveDown(0.3);
+                                doc.font('Times-Bold')
                                         .fontSize(size)
-                                        .fillColor(level <= 2 ? '#17365D' : '#304B6B')
+                                        .fillColor('#000000')
                                         .text(text, doc.page.margins.left, doc.y, {
                                                 width: pageWidth,
                                                 lineGap: 2,
-                                                align: 'left'
+                                                align
                                         });
-
-                                if (level <= 2) {
-                                        const dividerY = doc.y + 3;
-                                        doc.save();
-                                        doc.moveTo(doc.page.margins.left, dividerY)
-                                                .lineTo(doc.page.margins.left + pageWidth, dividerY)
-                                                .lineWidth(level === 1 ? 1 : 0.6)
-                                                .strokeColor('#D5DEE9')
-                                                .stroke();
-                                        doc.restore();
-                                        doc.y = dividerY + 5;
-                                }
-                                doc.moveDown(0.25);
+                                doc.moveDown(0.4);
                         } else if (token.type === 'paragraph') {
-                                const text = markdownPlainText(token.tokens ?? []).trim();
-                                if (text) writeParagraph(text);
+                                writeRich(token.tokens ?? []);
                         } else if (token.type === 'list') {
                                 for (const [i, item] of (token.items ?? []).entries()) {
-                                        const content = markdownPlainText(item.tokens ?? []).trim();
-                                        if (!content) continue;
-                                        const prefix = token.ordered ? `${i + 1}. ` : '\u2022 ';
-                                        writeParagraph(prefix + content);
+                                        const prefix = token.ordered ? (i + 1) + '. ' : '\u2022 ';
+                                        writeRich(item.tokens ?? [], prefix);
                                 }
                                 doc.moveDown(0.25);
                         } else if (token.type === 'code') {
                                 writeCode(token.text ?? '', '#F3F5F7');
                         } else if (token.type === 'blockquote') {
-                                const text = markdownPlainText(token.tokens ?? []).trim();
-                                if (text) writeParagraph(text, 10, '#52657A');
+                                writeRich(token.tokens ?? []);
                         } else if (token.type === 'hr') {
                                 doc.moveDown(0.3);
                                 const y = doc.y;
@@ -615,7 +630,7 @@ export function activate(context: vscode.ExtensionContext) {
                                 doc.moveDown(0.25);
                         } else {
                                 const text = markdownPlainText([token]).trim();
-                                if (text) writeParagraph(text);
+                                if (text) writeRich([{ type: 'text', text }]);
                         }
                 }
         };
